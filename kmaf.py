@@ -27,21 +27,26 @@ from sklearn.preprocessing import MinMaxScaler as MMS       # all of the action 
 
 from typing_extensions import Literal
 
+
+import cProfile, pstats, io
+from pstats import SortKey
+
 plt.style.use('dark_background')                            # it looks better in the dark
+matplotlib.use('TkAgg')
 
 __version__ = '1.0.1'                                       # I might remember to update the version number occasionally
 
 class KMeansAnim():
-    __FIG_SIZE    = (8,8)
+    _FIG_SIZE    = (8,8)
     
     # Marker settings
     #  Data
-    __ALPHA_DATA  = 0.6
-    __SIZE_DATA   = 20
+    _ALPHA_DATA  = 0.6
+    _SIZE_DATA   = 20
 
     #  Centroids
-    __ALPHA_CENT      = 0.9
-    __SIZE_CENT       = 500
+    _ALPHA_CENT      = 0.9
+    _SIZE_CENT       = 500
 
     # Initialization choices for centroids
     INIT_METHODS    = (
@@ -51,13 +56,13 @@ class KMeansAnim():
                       )
 
     # Transition curve for animation, (1/f) where f = 1 + (1/x^a - 1)^k
-    __SIGMOID_A   = 1.6       # "Timing"
-    __SIGMOID_K   = 2.4       # "Sharpness"
-    __SIGMOID_RES = 30        # Number of points
-    __SIGMOID_MIN = 0.01      # Not zero
-    __SIGMOID_MAX = 1.00      # Definitely one
+    _SIGMOID_A   = 1.6       # "Timing"
+    _SIGMOID_K   = 2.4       # "Sharpness"
+    _SIGMOID_RES = 30        # Number of points
+    _SIGMOID_MIN = 0.01      # Not zero
+    _SIGMOID_MAX = 1.00      # Definitely one
 
-    __DT          = 1.00      # For sleeps, in seconds. So the animation doesn't run too fast.
+    _DT          = 1.00      # For sleeps, in seconds. So the animation doesn't run too fast.
     
     def __init__(self, 
                  n_points: int           = 420, 
@@ -69,213 +74,230 @@ class KMeansAnim():
                  ):
         
         # Initialize cluster settings
-        self.__n_points   = n_points
-        self.__n_clusters = n_clusters
+        self._n_points   = n_points
+        self._n_clusters = n_clusters
         
         if n_clusters_guess is None:
             # Default guess is the clairvoyant one
-            self.__n_clusters_guess = self.__n_clusters
+            self._n_clusters_guess = self._n_clusters
         else:
-            self.__n_clusters_guess = n_clusters_guess
+            self._n_clusters_guess = n_clusters_guess
         
         # Initialize PRNG
         if seed is None:
-            self.__seed = np.random.randint(1000)
+            self._seed = np.random.randint(1000)
         else:
-            self.__seed = seed
-        print('Running with seed: ', self.__seed)
-        self.__rng = np.random.RandomState(self.__seed)
+            self._seed = seed
+        print('Running with seed: ', self._seed)
+        self._rng = np.random.RandomState(self._seed)
 
         # Create the data
-        self.__create_data()
+        self._create_data()
 
         # Create the centroids
         if method not in self.INIT_METHODS:
             raise ('Unknown initialization method:', method)
         else:
-            self.__method = method
-        self.__create_centroids()
-        self.__cluster_colors = get_cmap(cmap)(np.linspace(0, 1, self.__n_clusters_guess))[:,:-1] # Everything except the alpha
+            self._method = method
+        self._create_centroids()
+        self._cluster_colors = get_cmap(cmap)(np.linspace(0, 1, self._n_clusters_guess))[:,:-1] # Everything except the alpha
 
         # Initialize a placeholder for new centroids
-        self.__new_centroids = self.__centroids.copy()
+        self._new_centroids = self._centroids.copy()
 
         # Transition curve for animations
-        self.__sigmoid = 1/(1+(1/np.linspace(self.__SIGMOID_MIN, 
-                                             self.__SIGMOID_MAX, 
-                                             self.__SIGMOID_RES)**self.__SIGMOID_A-1)**self.__SIGMOID_K)
-        self.__path_pos = self.__SIGMOID_RES-1
+        self._sigmoid = 1/(1+(1/np.linspace(self._SIGMOID_MIN, 
+                                             self._SIGMOID_MAX, 
+                                             self._SIGMOID_RES)**self._SIGMOID_A-1)**self._SIGMOID_K)
+        self._path_pos = self._SIGMOID_RES-1
 
         # Initialize the figure
-        self.__create_figure()
+        self._create_figure()
 
         # Run the animation
-        self.__go()
+        print("backend:", plt.rcParams["backend"])
+        self._go()
         return
     
-    def __create_data(self) -> None:
+    def _create_data(self) -> None:
         '''
         Generate random blobs of data within a unit square
         '''
-        self.__data, self.__y = mb(n_samples    = self.__n_points, 
-                                   centers      = self.__n_clusters, 
+        self._data, self._y = mb(n_samples    = self._n_points, 
+                                   centers      = self._n_clusters, 
                                    n_features   = 2,  
-                                   random_state = self.__rng)
-        self.__data = MMS().fit_transform(self.__data)
+                                   random_state = self._rng)
+        self._data = MMS().fit_transform(self._data)
         return
 
-    def __create_centroids(self) -> None:
+    def _create_centroids(self) -> None:
         '''
         Generate the initial centroid positions
         '''
-        if self.__method == 'Naive':
-            self.__centroids = self.__rng.random(size=(self.__n_clusters_guess, 2))
-        elif self.__method == 'Uniform':
-            self.__centroids = self.__data[self.__rng.choice(self.__data.shape[0], replace=False, size=self.__n_clusters_guess)]
-        elif self.__method == 'k++':
+        if self._method == 'Naive':
+            self._centroids = self._rng.random(size=(self._n_clusters_guess, 2))
+        elif self._method == 'Uniform':
+            self._centroids = self._data[self._rng.choice(self._data.shape[0], replace=False, size=self._n_clusters_guess)]
+        elif self._method == 'k++':
             # Select first centroid uniformly from the data
-            self.__centroids = self.__data[self.__rng.choice(self.__data.shape[0]), :].reshape(1,-1)
-            while self.__centroids.shape[0] < self.__n_clusters_guess:
+            self._centroids = self._data[self._rng.choice(self._data.shape[0]), :].reshape(1,-1)
+            while self._centroids.shape[0] < self._n_clusters_guess:
                 # Initialize distance array
-                d = np.zeros(shape=[self.__data.shape[0], self.__centroids.shape[0]])
+                d = np.zeros(shape=[self._data.shape[0], self._centroids.shape[0]])
                 
                 # Compute squared distance from each point to each centroid
-                for i, c in enumerate(self.__centroids):
-                    d[:,i] = np.sum((self.__data-c)**2,axis=1)
+                for i, c in enumerate(self._centroids):
+                    d[:,i] = np.sum((self._data-c)**2,axis=1)
                 
                 # Minimum squared distance for each point
                 p = np.min(d, axis=1)
                 
                 # Select the next centroid from the data with probability proportional
                 # to the squared distance to the closest centroid
-                idx = self.__rng.choice(len(self.__data), p=p/sum(p))
-                new_centroid = self.__data[idx,:].reshape(1,-1)
-                self.__centroids = np.concatenate([self.__centroids, new_centroid], axis=0)
+                idx = self._rng.choice(len(self._data), p=p/sum(p))
+                new_centroid = self._data[idx,:].reshape(1,-1)
+                self._centroids = np.concatenate([self._centroids, new_centroid], axis=0)
         else:
             # Should never happen [_]
-            raise ValueError('Unknown initialization method:', self.__method)
+            raise ValueError('Unknown initialization method:', self._method)
         return
     
-    def __create_figure(self) -> None:
+    def _create_figure(self) -> None:
         '''
         Initialize figure objects
         '''
-        self.__fig, self.__ax = plt.subplots(figsize=self.__FIG_SIZE)
+        self._fig, self._ax = plt.subplots(figsize=self._FIG_SIZE)
 
         # Initialize empty plots with display settings for data and centroids
-        self.__scat_data = plt.scatter([], [], ec='k', alpha = self.__ALPHA_DATA, s = self.__SIZE_DATA)
-        self.__scat_cent = plt.scatter([], [], ec='w', s = self.__SIZE_CENT, marker='*', linewidths=1.5)
+        self._scat_data = plt.scatter([], [], ec='k', alpha = self._ALPHA_DATA, s = self._SIZE_DATA)
+        self._scat_cent = plt.scatter([], [], ec='w', s = self._SIZE_CENT, marker='*', linewidths=1.5)
 
         # Initialize the color arrays
-        self.__color_data = np.ones([len(self.__data),3])
-        self.__color_cent = self.__cluster_colors
+        self._color_data = np.ones([len(self._data),3])
+        self._color_cent = self._cluster_colors
 
         # Make the centroids invisible at first
-        self.__scat_cent.set_alpha(0)
+        self._scat_cent.set_alpha(0)
 
-        self.__ax.set_xticks([])
-        self.__ax.set_yticks([])
-        self.__ax.set_xlim(-0.01,1.01)
-        self.__ax.set_ylim(-0.01,1.01)
+        self._ax.set_xticks([])
+        self._ax.set_yticks([])
+        self._ax.set_xlim(-0.01,1.01)
+        self._ax.set_ylim(-0.01,1.01)
         return
     
-    def __update_clusters(self) -> None:
+    def _update_clusters(self) -> None:
         '''
         Update cluster labels according to their closest centroid
         '''
         distances = []
-        for c in self.__centroids:
-            d = np.sum((self.__data - c)**2,axis=1)
+        for c in self._centroids:
+            d = np.sum((self._data - c)**2,axis=1)
             distances.append(d)
-        self.__labels = np.argmin(np.array(distances).T,axis=1)
+        self._labels = np.argmin(np.array(distances).T,axis=1)
 
-        for label in np.unique(self.__labels):
-            idx = np.where(self.__labels == label)
-            self.__color_data[idx, :] = self.__cluster_colors[label, :]
-        self.__scat_data.set_color(self.__color_data)
+        for label in np.unique(self._labels):
+            idx = np.where(self._labels == label)
+            self._color_data[idx, :] = self._cluster_colors[label, :]
+        self._scat_data.set_color(self._color_data)
         return
     
-    def __update_centroids(self) -> None:
+    def _update_centroids(self) -> None:
         '''
         Compute new centroid positions (do not move the old ones yet)
         '''
-        for i in range(self.__n_clusters_guess):
-            idx = self.__labels == i
+        for i in range(self._n_clusters_guess):
+            idx = self._labels == i
             if sum(idx) == 0:
                 # Throw any unused centroids out of frame
-                self.__new_centroids[i,:] = [5,5]
+                self._new_centroids[i,:] = [5,5]
             else:
-                self.__new_centroids[i,:] = np.mean(self.__data[idx,:], axis=0)
+                self._new_centroids[i,:] = np.mean(self._data[idx,:], axis=0)
         return
     
-    def __create_centroid_path(self) -> None:
+    def _create_centroid_path(self) -> None:
         '''
         Create a path from the old centroids to the new ones (for animation purposes)
         '''
-        self.__path_pos = 0
-        self.__centroid_path = self.__centroids + np.array([si*(self.__new_centroids - self.__centroids) for si in self.__sigmoid])
+        self._path_pos = 0
+        self._centroid_path = self._centroids + np.array([si*(self._new_centroids - self._centroids) for si in self._sigmoid])
         return
     
-    def __move_along_centroid_path(self) -> None:
+    def _move_along_centroid_path(self) -> None:
         '''
         Take a step along the path from the old centroids to the new ones (for animation purposes)
         '''
-        self.__path_pos += 1
-        self.__centroids = self.__centroid_path[self.__path_pos, :]
+        self._path_pos += 1
+        self._centroids = self._centroid_path[self._path_pos, :]
         return
     
-    def __check_if_done(self) -> bool:
+    def _check_if_done(self) -> bool:
         '''
         Check if we are done moving from old centroid positions to new ones
         '''
-        return np.max(np.abs(self.__centroids - self.__new_centroids)) == 0
+        return np.max(np.abs(self._centroids - self._new_centroids)) == 0
 
-    def __update(self, 
+    def _update(self, 
                frame_number: int
                )->tuple[matplotlib.collections.PathCollection]:
         '''
         Updater function for the animation
         '''
         if frame_number == 0:
-            self.__scat_cent.set_facecolor(self.__color_cent)
-            self.__scat_cent.set_alpha(self.__ALPHA_CENT)
-            self.__scat_data.set_offsets(self.__data)
-            self.__steps = 0
-            self.__hold = True
+            self._scat_cent.set_facecolor(self._color_cent)
+            self._scat_cent.set_alpha(self._ALPHA_CENT)
+            self._scat_data.set_offsets(self._data)
+            self._steps = 0
+            self._hold = True
         else:
-            if self.__path_pos == self.__SIGMOID_RES-1:
-                self.__steps += 1
-                self.__ax.set_title('Iteration: ' + str(self.__steps))
-                sleep(self.__DT)
-                self.__update_clusters()
-                self.__update_centroids()
-                self.__create_centroid_path()
+            if self._path_pos == self._SIGMOID_RES-1:
+                self._steps += 1
+                self._ax.set_title('Iteration: ' + str(self._steps))
+                sleep(self._DT)
+                self._update_clusters()
+                self._update_centroids()
+                self._create_centroid_path()
             else:
-                self.__move_along_centroid_path()
-                self.hold=True
+                self._move_along_centroid_path()
+                self._hold=True
 
-        self.__scat_cent.set_offsets(self.__centroids)
+        self._scat_cent.set_offsets(self._centroids)
 
-        if self.__hold:
-            self.__hold = False
-        elif self.__check_if_done():
-            self.__ax.set_title('We are done after ' + str(self.__steps-1) + ' iteration(s).')
-            self.__ani.event_source.stop() 
+        if self._hold:
+            self._hold = False
+        elif self._check_if_done():
+            self._ax.set_title('We are done after ' + str(self._steps-1) + ' iteration(s).')
+            self._ani.event_source.stop() 
         
-        return self.__scat_data, self.__scat_cent, 
+        return self._scat_data, self._scat_cent, 
 
-    def __go(self) -> None:
+    def _go(self) -> None:
         '''
         Run the animation
         '''
-        self.__ani = FuncAnimation(self.__fig, 
-                                   self.__update,
+        self._ani = FuncAnimation(self._fig, 
+                                   self._update,
                                    blit = False,  # Can't seem to get blitting to work when the figure has titles, even if using ax.text inside the plot area as many have recommended :-(
                                    interval = 10,
-                                   cache_frame_data = True)
+                                   cache_frame_data = False
+                                   )
         plt.show()
         return
 
 # In case we want to run it like a script.
 if __name__ == '__main__':
+
+    pr = cProfile.Profile()
+    pr.enable()
+    
+    
     k = KMeansAnim()
+    
+    
+    
+    pr.disable()
+    s = io.StringIO()
+    sortby = SortKey.CUMULATIVE
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+    print(s.getvalue())
+    

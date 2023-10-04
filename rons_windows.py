@@ -211,10 +211,10 @@ class SimpleWindow():
     
     def go(self):
         '''
-        Run the function assigned. This is configured by first calling BindGo().
+        Run the function assigned. This is configured by first calling bind_go().
 
         The kwargs are retrieved such that the key is the name of the parameter that
-        was provided to BindGo(), and the value is the label provided to AddSetting()
+        was provided to bind_go(), and the value is the label provided to add_setting()
         '''
         try:
             local_kwargs = {}
